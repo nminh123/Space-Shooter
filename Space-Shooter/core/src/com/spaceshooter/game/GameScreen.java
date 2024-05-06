@@ -3,79 +3,173 @@ package com.spaceshooter.game;
 import com.badlogic.gdx.Screen;
 import com.badlogic.gdx.graphics.Camera;
 import com.badlogic.gdx.graphics.OrthographicCamera;
-import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
+import com.badlogic.gdx.graphics.g2d.TextureAtlas;
+import com.badlogic.gdx.graphics.g2d.TextureRegion;
 import com.badlogic.gdx.utils.viewport.StretchViewport;
 import com.badlogic.gdx.utils.viewport.Viewport;
 
-public class GameScreen implements Screen {
+import java.util.LinkedList;
+import java.util.ListIterator;
+
+class GameScreen implements Screen {
 
     //screen
     private Camera camera;
     private Viewport viewport;
+
     //graphics
     private SpriteBatch batch;
-    //private Texture background;
-    private Texture[] background;
+    private TextureAtlas textureAtlas;
+
+    private TextureRegion[] backgrounds;
+    private float backgroundHeight; //height of background in World units
+
+    private TextureRegion playerShipTextureRegion, playerShieldTextureRegion,
+            enemyShipTextureRegion, enemyShieldTextureRegion,
+            playerLaserTextureRegion, enemyLaserTextureRegion;
+
     //timing
-    //private int backgroundOffset;
-    private float[]backgroundOffset = {0,0,0,0};
+    private float[] backgroundOffsets = {0, 0, 0, 0};
     private float backgroundMaxScrollingSpeed;
-    private final int WORLD_HEIGHT = 128;
+
+    //world parameters
     private final int WORLD_WIDTH = 72;
+    private final int WORLD_HEIGHT = 128;
 
-    GameScreen()
-    {
+    //game objects
+    private Ship playerShip;
+    private Ship enemyShip;
+    private LinkedList<Laser> playerLaserList;
+    private LinkedList<Laser> enemyLaserList;
+
+    GameScreen() {
+
         camera = new OrthographicCamera();
-        viewport = new StretchViewport(WORLD_WIDTH,WORLD_HEIGHT,camera);
-        background = new Texture[4];
-//        background = new Texture("darkPurpleStarscape.png");
-//        backgroundOffset = 0;
+        viewport = new StretchViewport(WORLD_WIDTH, WORLD_HEIGHT, camera);
 
-        background[0] = new Texture("Starscape00.png");
-        background[1] = new Texture("Starscape01.png");
-        background[2] = new Texture("Starscape02.png");
-        background[3] = new Texture("Starscape03.png");
+        //set up the texture atlas
+        textureAtlas = new TextureAtlas("images.atlas");
 
-        backgroundMaxScrollingSpeed = (float)(WORLD_HEIGHT)/4;
+        //setting up the background
+        backgrounds = new TextureRegion[4];
+        backgrounds[0] = textureAtlas.findRegion("Starscape00");
+        backgrounds[1] = textureAtlas.findRegion("Starscape01");
+        backgrounds[2] = textureAtlas.findRegion("Starscape02");
+        backgrounds[3] = textureAtlas.findRegion("Starscape03");
+
+        backgroundHeight = WORLD_HEIGHT * 2;
+        backgroundMaxScrollingSpeed = (float) (WORLD_HEIGHT) / 4;
+
+        //initialize texture regions
+        playerShipTextureRegion = textureAtlas.findRegion("playerShip2_blue");
+        enemyShipTextureRegion = textureAtlas.findRegion("enemyRed3");
+        playerShieldTextureRegion = textureAtlas.findRegion("shield2");
+        enemyShieldTextureRegion = textureAtlas.findRegion("shield1");
+        enemyShieldTextureRegion.flip(false, true);
+
+        playerLaserTextureRegion = textureAtlas.findRegion("laserBlue03");
+        enemyLaserTextureRegion = textureAtlas.findRegion("laserRed03");
+
+        //set up game objects
+        playerShip = new PlayerShip(WORLD_WIDTH / 2, WORLD_HEIGHT / 4,
+                10, 10,
+                2, 3,
+                0.4f, 4, 45, 0.5f,
+                playerShipTextureRegion, playerShieldTextureRegion, playerLaserTextureRegion);
+
+        enemyShip = new EnemyShip(WORLD_WIDTH / 2, WORLD_HEIGHT * 3 / 4,
+                10, 10,
+                2, 1,
+                0.3f, 5, 50, 0.8f,
+                enemyShipTextureRegion, enemyShieldTextureRegion ,enemyLaserTextureRegion);
+
+        playerLaserList = new LinkedList<>();
+        enemyLaserList = new LinkedList<>();
 
         batch = new SpriteBatch();
-    }
-    @Override
-    public void show() {
-
     }
 
     @Override
     public void render(float deltaTime) {
         batch.begin();
+
+        playerShip.update(deltaTime);
+        enemyShip.update(deltaTime);
+
         //scrolling background
         renderBackground(deltaTime);
-        batch.end();
-    }
 
-    public void renderBackground(float deltaTime)
-    {
-        backgroundOffset[0] += deltaTime * backgroundMaxScrollingSpeed / 8;
-        backgroundOffset[1] += deltaTime * backgroundMaxScrollingSpeed / 4;
-        backgroundOffset[2] += deltaTime * backgroundMaxScrollingSpeed / 2;
-        backgroundOffset[3] += deltaTime * backgroundMaxScrollingSpeed;
+        //enemy ships
+        enemyShip.draw(batch);
 
-        for(int layer = 0; layer < backgroundOffset.length; layer++)
-        {
-            batch.draw(background[layer],0,-backgroundOffset[layer],WORLD_WIDTH,WORLD_HEIGHT);
-            batch.draw(background[layer],0,-backgroundOffset[layer]+WORLD_HEIGHT
-                    ,WORLD_WIDTH,WORLD_HEIGHT);
-            if(backgroundOffset[layer] > WORLD_HEIGHT)
-            {
-                backgroundOffset[layer] = 0;
+        //player ship
+        playerShip.draw(batch);
+
+        //lasers
+        //create new lasers
+        //player lasers
+        if (playerShip.canFireLaser()) {
+            Laser[] lasers = playerShip.fireLasers();
+            for (Laser laser: lasers) {
+                playerLaserList.add(laser);
+            }
+        }
+        //enemy lasers
+        if (enemyShip.canFireLaser()) {
+            Laser[] lasers = enemyShip.fireLasers();
+            for (Laser laser: lasers) {
+                enemyLaserList.add(laser);
             }
         }
 
+        //draw lasers
+        //remove old lasers
+        ListIterator<Laser> iterator = playerLaserList.listIterator();
+        while(iterator.hasNext()) {
+            Laser laser = iterator.next();
+            laser.draw(batch);
+            laser.yPosition += laser.movementSpeed*deltaTime;
+            if (laser.yPosition > WORLD_HEIGHT) {
+                iterator.remove();
+            }
+        }
+        iterator = enemyLaserList.listIterator();
+        while(iterator.hasNext()) {
+            Laser laser = iterator.next();
+            laser.draw(batch);
+            laser.yPosition -= laser.movementSpeed*deltaTime;
+            if (laser.yPosition + laser.height < 0) {
+                iterator.remove();
+            }
+        }
+
+        //explosions
+
+        batch.end();
     }
+
+    private void renderBackground(float deltaTime) {
+
+        //update position of background images
+        backgroundOffsets[0] += deltaTime * backgroundMaxScrollingSpeed / 8;
+        backgroundOffsets[1] += deltaTime * backgroundMaxScrollingSpeed / 4;
+        backgroundOffsets[2] += deltaTime * backgroundMaxScrollingSpeed / 2;
+        backgroundOffsets[3] += deltaTime * backgroundMaxScrollingSpeed;
+
+        //draw each background layer
+        for (int layer = 0; layer < backgroundOffsets.length; layer++) {
+            if (backgroundOffsets[layer] > WORLD_HEIGHT) {
+                backgroundOffsets[layer] = 0;
+            }
+            batch.draw(backgrounds[layer], 0, -backgroundOffsets[layer],
+                    WORLD_WIDTH, backgroundHeight);
+        }
+    }
+
     @Override
     public void resize(int width, int height) {
-        viewport.update(width,height,true);
+        viewport.update(width, height, true);
         batch.setProjectionMatrix(camera.combined);
     }
 
@@ -95,7 +189,12 @@ public class GameScreen implements Screen {
     }
 
     @Override
-    public void dispose() {
+    public void show() {
 
+    }
+
+    @Override
+    public void dispose() {
+        batch.dispose();
     }
 }
