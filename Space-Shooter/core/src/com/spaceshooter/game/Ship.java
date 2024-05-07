@@ -1,4 +1,5 @@
 package com.spaceshooter.game;
+
 import com.badlogic.gdx.graphics.g2d.Batch;
 import com.badlogic.gdx.graphics.g2d.TextureRegion;
 import com.badlogic.gdx.math.Rectangle;
@@ -56,10 +57,12 @@ abstract class Ship {
         return boundingBox.overlaps(otherRectangle);
     }
 
-    public void hit(Laser laser) {
+    public boolean hitAndCheckDestroyed(Laser laser) {
         if (shield > 0) {
             shield--;
+            return false;
         }
+        return true;
     }
 
     public void translate(float xChange, float yChange) {

@@ -1,4 +1,5 @@
 package com.spaceshooter.game;
+
 import com.badlogic.gdx.graphics.g2d.TextureRegion;
 
 class PlayerShip extends Ship {

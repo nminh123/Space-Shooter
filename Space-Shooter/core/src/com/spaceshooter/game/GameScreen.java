@@ -5,12 +5,14 @@ import com.badlogic.gdx.Input;
 import com.badlogic.gdx.Screen;
 import com.badlogic.gdx.graphics.Camera;
 import com.badlogic.gdx.graphics.OrthographicCamera;
+import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
 import com.badlogic.gdx.graphics.g2d.TextureAtlas;
 import com.badlogic.gdx.graphics.g2d.TextureRegion;
+import com.badlogic.gdx.math.Rectangle;
+import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.utils.viewport.StretchViewport;
 import com.badlogic.gdx.utils.viewport.Viewport;
-import com.badlogic.gdx.math.Vector2;
 
 import java.util.Arrays;
 import java.util.LinkedList;
@@ -25,6 +27,7 @@ class GameScreen implements Screen {
     //graphics
     private SpriteBatch batch;
     private TextureAtlas textureAtlas;
+    private Texture explosionTexture;
 
     private TextureRegion[] backgrounds;
     private float backgroundHeight; //height of background in World units
@@ -36,17 +39,20 @@ class GameScreen implements Screen {
     //timing
     private float[] backgroundOffsets = {0, 0, 0, 0};
     private float backgroundMaxScrollingSpeed;
+    private float timeBetweenEnemySpawns = 1f;
+    private float enemySpawnTimer = 0;
 
     //world parameters
     private final int WORLD_WIDTH = 72;
     private final int WORLD_HEIGHT = 128;
-    private final float TOUCH_MOVEMENT_THRESHOLD = 0.5f;
+    private final float TOUCH_MOVEMENT_THRESHOLD = 5f;
 
     //game objects
-    private Ship playerShip;
-    private Ship enemyShip;
+    private PlayerShip playerShip;
+    private LinkedList<EnemyShip> enemyShipList;
     private LinkedList<Laser> playerLaserList;
     private LinkedList<Laser> enemyLaserList;
+    private LinkedList<Explosion> explosionList;
 
     GameScreen() {
 
@@ -76,6 +82,8 @@ class GameScreen implements Screen {
         playerLaserTextureRegion = textureAtlas.findRegion("laserBlue03");
         enemyLaserTextureRegion = textureAtlas.findRegion("laserRed03");
 
+        explosionTexture = new Texture("explosion.png");
+
         //set up game objects
         playerShip = new PlayerShip(WORLD_WIDTH / 2, WORLD_HEIGHT / 4,
                 10, 10,
@@ -83,14 +91,12 @@ class GameScreen implements Screen {
                 0.4f, 4, 45, 0.5f,
                 playerShipTextureRegion, playerShieldTextureRegion, playerLaserTextureRegion);
 
-        enemyShip = new EnemyShip(WORLD_WIDTH / 2, WORLD_HEIGHT * 3 / 4,
-                10, 10,
-                2, 1,
-                0.3f, 5, 50, 0.8f,
-                enemyShipTextureRegion, enemyShieldTextureRegion, enemyLaserTextureRegion);
+        enemyShipList = new LinkedList<>();
 
         playerLaserList = new LinkedList<>();
         enemyLaserList = new LinkedList<>();
+
+        explosionList = new LinkedList<>();
 
         batch = new SpriteBatch();
     }
@@ -99,17 +105,21 @@ class GameScreen implements Screen {
     public void render(float deltaTime) {
         batch.begin();
 
-        detectInput(deltaTime);
-
-        playerShip.update(deltaTime);
-        enemyShip.update(deltaTime);
-
         //scrolling background
         renderBackground(deltaTime);
 
-        //enemy ships
-        enemyShip.draw(batch);
+        detectInput(deltaTime);
+        playerShip.update(deltaTime);
 
+        spawnEnemyShips(deltaTime);
+
+        ListIterator<EnemyShip> enemyShipListIterator = enemyShipList.listIterator();
+        while (enemyShipListIterator.hasNext()) {
+            EnemyShip enemyShip = enemyShipListIterator.next();
+            moveEnemy(enemyShip, deltaTime);
+            enemyShip.update(deltaTime);
+            enemyShip.draw(batch);
+        }
         //player ship
         playerShip.draw(batch);
 
@@ -120,9 +130,23 @@ class GameScreen implements Screen {
         detectCollisions();
 
         //explosions
-        renderExplosions(deltaTime);
+        updateAndRenderExplosions(deltaTime);
 
         batch.end();
+    }
+
+    private void spawnEnemyShips(float deltaTime) {
+        enemySpawnTimer += deltaTime;
+
+        if (enemySpawnTimer > timeBetweenEnemySpawns) {
+            enemyShipList.add(new EnemyShip(SpaceShooterGame.random.nextFloat() * (WORLD_WIDTH - 10) + 5,
+                    WORLD_HEIGHT - 5,
+                    10, 10,
+                    48, 1,
+                    0.3f, 5, 50, 0.8f,
+                    enemyShipTextureRegion, enemyShieldTextureRegion, enemyLaserTextureRegion));
+            enemySpawnTimer -= timeBetweenEnemySpawns;
+        }
     }
 
     private void detectInput(float deltaTime) {
@@ -135,84 +159,131 @@ class GameScreen implements Screen {
         leftLimit = -playerShip.boundingBox.x;
         downLimit = -playerShip.boundingBox.y;
         rightLimit = WORLD_WIDTH - playerShip.boundingBox.x - playerShip.boundingBox.width;
-        upLimit = WORLD_HEIGHT/2 - playerShip.boundingBox.y - playerShip.boundingBox.height;
+        upLimit = (float) WORLD_HEIGHT / 2 - playerShip.boundingBox.y - playerShip.boundingBox.height;
 
-        if (Gdx.input.isKeyPressed(Input.Keys.D) && rightLimit > 0) {
-            playerShip.translate(Math.min(playerShip.movementSpeed*deltaTime, rightLimit), 0f);
+        if (Gdx.input.isKeyPressed(Input.Keys.RIGHT) && rightLimit > 0) {
+            playerShip.translate(Math.min(playerShip.movementSpeed * deltaTime, rightLimit), 0f);
         }
-        if (Gdx.input.isKeyPressed(Input.Keys.W) && upLimit > 0) {
-            playerShip.translate( 0f, Math.min(playerShip.movementSpeed*deltaTime, upLimit));
-        }
-
-        if (Gdx.input.isKeyPressed(Input.Keys.A) && leftLimit < 0) {
-            playerShip.translate(Math.max(-playerShip.movementSpeed*deltaTime, leftLimit), 0f);
-        }
-        if (Gdx.input.isKeyPressed(Input.Keys.S) && downLimit < 0) {
-            playerShip.translate(0f, Math.max(-playerShip.movementSpeed*deltaTime, downLimit));
+        if (Gdx.input.isKeyPressed(Input.Keys.UP) && upLimit > 0) {
+            playerShip.translate(0f, Math.min(playerShip.movementSpeed * deltaTime, upLimit));
         }
 
-            //touch Input
-        if(Gdx.input.isTouched())
-        {
+        if (Gdx.input.isKeyPressed(Input.Keys.LEFT) && leftLimit < 0) {
+            playerShip.translate(Math.max(-playerShip.movementSpeed * deltaTime, leftLimit), 0f);
+        }
+        if (Gdx.input.isKeyPressed(Input.Keys.DOWN) && downLimit < 0) {
+            playerShip.translate(0f, Math.max(-playerShip.movementSpeed * deltaTime, downLimit));
+        }
+
+        //touch input (also mouse)
+        if (Gdx.input.isTouched()) {
             //get the screen position of the touch
             float xTouchPixels = Gdx.input.getX();
             float yTouchPixels = Gdx.input.getY();
+
             //convert to world position
-            Vector2 touchPoint = new Vector2(xTouchPixels,yTouchPixels);
+            Vector2 touchPoint = new Vector2(xTouchPixels, yTouchPixels);
             touchPoint = viewport.unproject(touchPoint);
-            //caculate the x and y differences
-            Vector2 playerShipCentre = new Vector2
-                    (playerShip.boundingBox.x + playerShip.boundingBox.width/2,
-                    playerShip.boundingBox.y+playerShip.boundingBox.height/2);
+
+            //calculate the x and y differences
+            Vector2 playerShipCentre = new Vector2(
+                    playerShip.boundingBox.x + playerShip.boundingBox.width / 2,
+                    playerShip.boundingBox.y + playerShip.boundingBox.height / 2);
 
             float touchDistance = touchPoint.dst(playerShipCentre);
 
-            if(touchDistance > TOUCH_MOVEMENT_THRESHOLD)
-            {
+            if (touchDistance > TOUCH_MOVEMENT_THRESHOLD) {
                 float xTouchDifference = touchPoint.x - playerShipCentre.x;
                 float yTouchDifference = touchPoint.y - playerShipCentre.y;
-                //scale to the maximum speed of the ship
-                float xMove = xTouchDifference / touchDistance * playerShip.movementSpeed*deltaTime;
-                float yMove = yTouchDifference / touchDistance * playerShip.movementSpeed*deltaTime;
-                if(xMove > 0)
-                    xMove = Math.min(xMove, rightLimit);
-                else
-                    xMove = Math.max(xMove, leftLimit);
-                if(yMove > 0)
-                    yMove = Math.min(yMove, rightLimit);
-                else
-                    yMove = Math.max(yMove, leftLimit);
-                playerShip.translate(xMove,yMove);
-            }
 
+                //scale to the maximum speed of the ship
+                float xMove = xTouchDifference / touchDistance * playerShip.movementSpeed * deltaTime;
+                float yMove = yTouchDifference / touchDistance * playerShip.movementSpeed * deltaTime;
+
+                if (xMove > 0) xMove = Math.min(xMove, rightLimit);
+                else xMove = Math.max(xMove, leftLimit);
+
+                if (yMove > 0) yMove = Math.min(yMove, upLimit);
+                else yMove = Math.max(yMove, downLimit);
+
+                playerShip.translate(xMove, yMove);
+            }
         }
+    }
+
+    private void moveEnemy(EnemyShip enemyShip, float deltaTime) {
+        //strategy: determine the max distance the ship can move
+
+        float leftLimit, rightLimit, upLimit, downLimit;
+        leftLimit = -enemyShip.boundingBox.x;
+        downLimit = (float) WORLD_HEIGHT / 2 - enemyShip.boundingBox.y;
+        rightLimit = WORLD_WIDTH - enemyShip.boundingBox.x - enemyShip.boundingBox.width;
+        upLimit = WORLD_HEIGHT - enemyShip.boundingBox.y - enemyShip.boundingBox.height;
+
+        float xMove = enemyShip.getDirectionVector().x * enemyShip.movementSpeed * deltaTime;
+        float yMove = enemyShip.getDirectionVector().y * enemyShip.movementSpeed * deltaTime;
+
+        if (xMove > 0) xMove = Math.min(xMove, rightLimit);
+        else xMove = Math.max(xMove, leftLimit);
+
+        if (yMove > 0) yMove = Math.min(yMove, upLimit);
+        else yMove = Math.max(yMove, downLimit);
+
+        enemyShip.translate(xMove, yMove);
     }
 
     private void detectCollisions() {
-        // đối với mỗi tia laser của người chơi, hãy kiểm tra xem nó có giao nhau với tàu địch không
-        ListIterator<Laser> iterator = playerLaserList.listIterator();
-        while (iterator.hasNext()) {
-            Laser laser = iterator.next();
-            if (enemyShip.intersects(laser.boundingBox)) {
-                //contact with enemy ship
-                enemyShip.hit(laser);
-                iterator.remove();
+        //for each player laser, check whether it intersects an enemy ship
+        ListIterator<Laser> laserListIterator = playerLaserList.listIterator();
+        while (laserListIterator.hasNext()) {
+            Laser laser = laserListIterator.next();
+            ListIterator<EnemyShip> enemyShipListIterator = enemyShipList.listIterator();
+            while (enemyShipListIterator.hasNext()) {
+                EnemyShip enemyShip = enemyShipListIterator.next();
+
+                if (enemyShip.intersects(laser.boundingBox)) {
+                    //contact with enemy ship
+                    if (enemyShip.hitAndCheckDestroyed(laser)) {
+                        enemyShipListIterator.remove();
+                        explosionList.add(
+                                new Explosion(explosionTexture,
+                                        new Rectangle(enemyShip.boundingBox),
+                                        0.7f));
+                    }
+                    laserListIterator.remove();
+                    break;
+                }
             }
         }
         //for each enemy laser, check whether it intersects the player ship
-        iterator = enemyLaserList.listIterator();
-        while (iterator.hasNext()) {
-            Laser laser = iterator.next();
+        laserListIterator = enemyLaserList.listIterator();
+        while (laserListIterator.hasNext()) {
+            Laser laser = laserListIterator.next();
             if (playerShip.intersects(laser.boundingBox)) {
                 //contact with player ship
-                playerShip.hit(laser);
-                iterator.remove();
+                if (playerShip.hitAndCheckDestroyed(laser)) {
+                    explosionList.add(
+                            new Explosion(explosionTexture,
+                                    new Rectangle(playerShip.boundingBox),
+                                    1.6f));
+                    playerShip.shield = 10;
+                }
+                laserListIterator.remove();
             }
         }
     }
 
-    private void renderExplosions(float deltaTime) {
-
+    private void updateAndRenderExplosions(float deltaTime) {
+        ListIterator<Explosion> explosionListIterator = explosionList.listIterator();
+        while (explosionListIterator.hasNext()) {
+            Explosion explosion = explosionListIterator.next();
+            explosion.update(deltaTime);
+            if (explosion.isFinished()) {
+                explosionListIterator.remove();
+            } else {
+                explosion.draw(batch);
+            }
+        }
     }
 
     private void renderLasers(float deltaTime) {
@@ -223,11 +294,14 @@ class GameScreen implements Screen {
             playerLaserList.addAll(Arrays.asList(lasers));
         }
         //enemy lasers
-        if (enemyShip.canFireLaser()) {
-            Laser[] lasers = enemyShip.fireLasers();
-            enemyLaserList.addAll(Arrays.asList(lasers));
+        ListIterator<EnemyShip> enemyShipListIterator = enemyShipList.listIterator();
+        while (enemyShipListIterator.hasNext()) {
+            EnemyShip enemyShip = enemyShipListIterator.next();
+            if (enemyShip.canFireLaser()) {
+                Laser[] lasers = enemyShip.fireLasers();
+                enemyLaserList.addAll(Arrays.asList(lasers));
+            }
         }
-
         //draw lasers
         //remove old lasers
         ListIterator<Laser> iterator = playerLaserList.listIterator();
