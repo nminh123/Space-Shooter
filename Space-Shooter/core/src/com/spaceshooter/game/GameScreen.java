@@ -99,6 +99,7 @@ class GameScreen implements Screen {
 
     @Override
     public void render(float deltaTime) {
+        Gdx.app.log("GameScreen FPS", (1/deltaTime) + "");
         batch.begin();
 
         //scrolling background
